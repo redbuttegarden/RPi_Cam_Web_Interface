@@ -175,6 +175,9 @@ fi
 fn_stop ()
 { # This is function stop
         sudo killall raspimjpeg 2>/dev/null
+        sudo pkill -f '[r]picam_picamera2.py' 2>/dev/null
+        sudo pkill -f '[/]usr/bin/raspimjpeg' 2>/dev/null
+        sudo pkill -f '[/]opt/vc/bin/raspimjpeg' 2>/dev/null
         sudo killall php 2>/dev/null
         sudo killall motion 2>/dev/null
 }
