@@ -38,10 +38,16 @@ set -x
 cd $(dirname $(readlink -f $0))
 
 source ./config.txt
+if [ -z "$camera_backend" ]; then
+   camera_backend="legacy"
+fi
 
 fn_stop ()
 { # This is function stop
    sudo killall raspimjpeg 2>/dev/null
+   if [ "$camera_backend" == "picamera2" ]; then
+      sudo pkill -f '[r]picam_picamera2.py|[/]usr/bin/raspimjpeg|[/]opt/vc/bin/raspimjpeg' 2>/dev/null
+   fi
    sudo killall php 2>/dev/null
    sudo killall motion 2>/dev/null
 }

@@ -45,10 +45,16 @@ color_green="tput setaf 2"
 color_reset="tput sgr0"
 
 source ./config.txt
+if [ -z "$camera_backend" ]; then
+   camera_backend="legacy"
+fi
 
 fn_stop ()
 { # This is function stop
         sudo killall raspimjpeg 2>/dev/null
+        if [ "$camera_backend" == "picamera2" ]; then
+          sudo pkill -f '[r]picam_picamera2.py|[/]usr/bin/raspimjpeg|[/]opt/vc/bin/raspimjpeg' 2>/dev/null
+        fi
         sudo killall php 2>/dev/null
         sudo killall motion 2>/dev/null
         sudo service apache2 stop >dev/null 2>&1
@@ -59,6 +65,12 @@ fn_stop ()
 
 fn_autostart_disable ()
 {
+  if [ "$camera_backend" == "picamera2" ]; then
+    sudo systemctl disable rpicam-web.service >/dev/null 2>&1
+    sudo rm -f /etc/systemd/system/rpicam-web.service
+    sudo systemctl daemon-reload
+    return
+  fi
   tmpfile=$(mktemp)
   sudo sed '/#START/,/#END/d' /etc/rc.local > "$tmpfile" && sudo mv "$tmpfile" /etc/rc.local
   # Remove to growing plank lines.
@@ -98,8 +110,8 @@ fn_stop
 dialog --title "Uninstall packages!" --backtitle "$backtitle" --yesno "Do You want uninstall webserver and php packages also?" 6 35
 response=$?
 case $response in
-   0) package=('apache2' 'php5' 'libapache2-mod-php5' 'php5-cli' 'zip' 'nginx' 'lighttpd' 'apache2-utils' 'php5-fpm' 'php5-common' 'php-apc' 'gpac' 'motion' 'libav-tools');;
-   1) package=('zip' 'gpac motion' 'libav-tools');; 
+   0) package=('apache2' 'php5' 'libapache2-mod-php5' 'php5-cli' 'php7.3' 'php7.3-cli' 'php7.3-fpm' 'php7.3-common' 'libapache2-mod-php7.3' 'php7.4' 'php7.4-cli' 'php7.4-fpm' 'php7.4-common' 'libapache2-mod-php7.4' 'php8.2' 'php8.2-cli' 'php8.2-fpm' 'php8.2-common' 'libapache2-mod-php8.2' 'php8.4' 'php8.4-cli' 'php8.4-fpm' 'php8.4-common' 'libapache2-mod-php8.4' 'zip' 'nginx' 'lighttpd' 'apache2-utils' 'php5-fpm' 'php5-common' 'php-apc' 'gpac' 'motion' 'libav-tools' 'ffmpeg' 'python3-picamera2' 'python3-pil');;
+   1) package=('zip' 'gpac' 'motion' 'libav-tools' 'ffmpeg' 'python3-picamera2' 'python3-pil');;
    255) dialog --title 'Uninstall message' --infobox 'Webserver and php packages not uninstalled.' 4 33 ; sleep 2;;
 esac
 for i in "${package[@]}"
@@ -131,4 +143,3 @@ sudo mv etc/apache2/sites-available/*default* /etc/apache2/sites-available >/dev
 if [ $(dpkg-query -W -f='${Status}' "apache2" 2>/dev/null | grep -c "ok installed") -eq 1 ]; then
    fn_apache_default
 fi
-

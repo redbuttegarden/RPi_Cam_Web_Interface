@@ -45,6 +45,7 @@ fi
 #Legacy support Bullseye
 read -d . VERSION < /etc/debian_version
 echo $VERSION
+camera_backend_default="legacy"
 if [ $VERSION  -eq 10 ]; then
    phpversion=7.3
 elif [ $VERSION -eq 11 ]; then
@@ -60,6 +61,10 @@ elif [ $VERSION -eq 12 ]; then
 #   sudo sed -i 's/^camera_auto_detect=1/#camera_auto_detect=1/g' /boot/config.txt
 #   sudo grep -qxF 'start_x=1' /boot/config.txt || sudo sed -i '$ a start_x=1' /boot/config.txt
 #   sudo grep -qxF 'gpu_mem=128' /boot/config.txt || sudo sed -i '$ a gpu_mem=128' /boot/config.txt
+   sudo mkdir -p /opt/vc/bin
+elif [ $VERSION -eq 13 ]; then
+   phpversion=8.4
+   camera_backend_default="picamera2"
    sudo mkdir -p /opt/vc/bin
 else
    phpversion=7.0
@@ -87,11 +92,15 @@ if [ ! -e ./config.txt ]; then
       sudo echo "autostart=\"yes\"" >> ./config.txt
       sudo echo "jpglink=\"no\"" >> ./config.txt
       sudo echo "phpversion=\"$phpversion\"" >> ./config.txt
+      sudo echo "camera_backend=\"$camera_backend_default\"" >> ./config.txt
       sudo echo "" >> ./config.txt
       sudo chmod 664 ./config.txt
 fi
 
 source ./config.txt
+if [ -z "$camera_backend" ]; then
+   camera_backend="$camera_backend_default"
+fi
 rpicamdirold=$rpicamdir
 if [ ! "${rpicamdirold:0:1}" == "" ]; then
    rpicamdirold=/$rpicamdirold
@@ -115,7 +124,8 @@ if [ $# -eq 0 ] || [ "$1" != "q" ]; then
    "User:(blank=nologin)"  5 1   "$user"        5 32 15 0  \
    "Password:"             6 1   "$webpasswd"   6 32 15 0  \
    "jpglink:(yes/no)"      7 1   "$jpglink"     7 32 15 0  \
-   "php:(stretch 7.0,buster 7.3)"           8 1   "$phpversion"  8 32 15 0  \
+   "php:(buster 7.3,bookworm 8.2,trixie 8.4)" 8 1 "$phpversion" 8 42 15 0  \
+   "Camera backend:(legacy/picamera2)" 9 1 "$camera_backend" 9 42 15 0  \
    2>&1 1>&3 | {
       read -r rpicamdir
       read -r autostart
@@ -125,6 +135,7 @@ if [ $# -eq 0 ] || [ "$1" != "q" ]; then
       read -r webpasswd
 	  read -r jpglink
 	  read -r phpversion
+      read -r camera_backend
    if [ -n "$webport" ]; then
       sudo echo "#This is edited config file for main installer. Put any extra options in here." > ./config.txt
       sudo echo "rpicamdir=\"$rpicamdir\"" >> ./config.txt
@@ -135,6 +146,7 @@ if [ $# -eq 0 ] || [ "$1" != "q" ]; then
       sudo echo "autostart=\"$autostart\"" >> ./config.txt
       sudo echo "jpglink=\"$jpglink\"" >> ./config.txt
       sudo echo "phpversion=\"$phpversion\"" >> ./config.txt
+      sudo echo "camera_backend=\"$camera_backend\"" >> ./config.txt
       sudo echo "" >> ./config.txt
    else
       echo "exit" > ./exitfile.txt
@@ -148,6 +160,9 @@ if [ $# -eq 0 ] || [ "$1" != "q" ]; then
    fi
 
    source ./config.txt
+   if [ -z "$camera_backend" ]; then
+      camera_backend="$camera_backend_default"
+   fi
 fi
 
 if [ ! "${rpicamdir:0:1}" == "" ]; then
@@ -241,11 +256,7 @@ else
    sed -i "s/auth_basic\ .*/auth_basic \"Restricted\";/g" $aconf
    sed -i "s/#auth_basic_user_file/\ auth_basic_user_file/g" $aconf
 fi
-if [[ "$phpversion" == "7.4" ]]; then
-   sed -i "s/\/var\/run\/php5-fpm\.sock;/\/run\/php\/php7.4-fpm\.sock;/g" $aconf
-elif [[ "$phpversion" == "7.3" ]]; then
-   sed -i "s/\/var\/run\/php5-fpm\.sock;/\/run\/php\/php7.3-fpm\.sock;/g" $aconf
-fi
+sed -i "s/\/var\/run\/php5-fpm\.sock;/\/run\/php\/php$phpversion-fpm\.sock;/g" $aconf
 sudo sed -i -E "s/(listen.+?)80/\1$webport/g" $aconf
 # following line sets root url to direct subfolder. This is inconsistent with other usage.
 #sudo sed -i -E "s/root \/var\/www/root \/var\/www$rpicamdirEsc/" $aconf
@@ -263,16 +274,8 @@ if [ "$NGINX_DISABLE_LOGGING" != "" ]; then
    sudo sed -i "s:access_log /var/log/nginx/nginx/access.log;:access_log /dev/null;:g" /etc/nginx/nginx.conf
 fi
 
-# Configure php-apc
-if [[ "$phpversion" == "7.3" ]]; then
-	phpnv=/etc/php/7.3
-else
-	phpnv=/etc/php/$phpversion
-fi
+phpnv=/etc/php/$phpversion
 sudo sh -c "echo \"cgi.fix_pathinfo = 0;\" >> $phpnv/fpm/php.ini"
-sudo mkdir $phpnv/conf.d >/dev/null 2>&1
-sudo cp etc/php5/apc.ini $phpnv/conf.d/20-apc.ini
-sudo chmod 644 $phpnv/conf.d/20-apc.ini
 sudo service nginx restart
 }
 
@@ -317,6 +320,34 @@ sudo chmod 664 /etc/motion/motion.conf
 
 fn_autostart ()
 {
+if [ "$camera_backend" == "picamera2" ]; then
+   servicefile="/etc/systemd/system/rpicam-web.service"
+   if [ "$autostart" == "yes" ]; then
+      install_dir="$(pwd)"
+      sudo bash -c "cat > $servicefile" << EOF
+[Unit]
+Description=RPi Cam Web Interface
+After=network.target
+
+[Service]
+Type=forking
+WorkingDirectory=$install_dir
+ExecStart=$install_dir/start.sh
+ExecStop=$install_dir/stop.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+      sudo systemctl daemon-reload
+      sudo systemctl enable rpicam-web.service
+   else
+      sudo systemctl disable rpicam-web.service >/dev/null 2>&1
+      sudo rm -f "$servicefile"
+      sudo systemctl daemon-reload
+   fi
+   return
+fi
 tmpfile=$(mktemp)
 sudo sed '/#START/,/#END/d' /etc/rc.local > "$tmpfile" && sudo mv "$tmpfile" /etc/rc.local
 # Remove to growing plank lines.
@@ -373,16 +404,22 @@ else
    phpv=php$phpversion
 fi
 
+if [ "$camera_backend" == "picamera2" ]; then
+   camera_packages="python3-picamera2 python3-pil ffmpeg"
+else
+   camera_packages="gpac"
+fi
+
 if [ "$webserver" == "apache" ]; then
-   sudo apt-get install -y apache2 $phpv $phpv-cli libapache2-mod-$phpv gpac motion zip gstreamer1.0-tools
+   sudo apt-get install -y apache2 $phpv $phpv-cli libapache2-mod-$phpv $camera_packages motion zip gstreamer1.0-tools
    if [ $? -ne 0 ]; then exit; fi
    fn_apache
 elif [ "$webserver" == "nginx" ]; then
-   sudo apt-get install -y nginx $phpv-fpm $phpv-cli $phpv-common php-apcu apache2-utils gpac motion zip gstreamer1.0-tools
+   sudo apt-get install -y nginx $phpv-fpm $phpv-cli $phpv-common apache2-utils $camera_packages motion zip gstreamer1.0-tools
    if [ $? -ne 0 ]; then exit; fi
    fn_nginx
 elif [ "$webserver" == "lighttpd" ]; then
-   sudo apt-get install -y  lighttpd $phpv-cli $phpv-common $phpv-cgi $phpv gpac motion zip gstreamer1.0-tools
+   sudo apt-get install -y  lighttpd $phpv-cli $phpv-common $phpv-cgi $phpv $camera_packages motion zip gstreamer1.0-tools
    if [ $? -ne 0 ]; then exit; fi
    fn_lighttpd
 fi
@@ -429,11 +466,13 @@ sudo chown -R www-data:www-data /var/www$rpicamdir
 sudo cp etc/sudoers.d/RPI_Cam_Web_Interface /etc/sudoers.d/
 sudo chmod 440 /etc/sudoers.d/RPI_Cam_Web_Interface
 
-sudo cp -r bin/raspimjpeg /opt/vc/bin/
-sudo chmod 755 /opt/vc/bin/raspimjpeg
-if [ ! -e /usr/bin/raspimjpeg ]; then
-   sudo ln -s /opt/vc/bin/raspimjpeg /usr/bin/raspimjpeg
+if [ "$camera_backend" == "picamera2" ]; then
+   sudo cp -r bin/rpicam_picamera2.py /opt/vc/bin/raspimjpeg
+else
+   sudo cp -r bin/raspimjpeg /opt/vc/bin/
 fi
+sudo chmod 755 /opt/vc/bin/raspimjpeg
+sudo ln -sf /opt/vc/bin/raspimjpeg /usr/bin/raspimjpeg
 
 sed -e "s/www/www$rpicamdirEsc/" etc/raspimjpeg/raspimjpeg.1 > etc/raspimjpeg/raspimjpeg
 if [[ `cat /proc/cmdline |awk -v RS=' ' -F= '/boardrev/ { print $2 }'` == "0x11" ]]; then
