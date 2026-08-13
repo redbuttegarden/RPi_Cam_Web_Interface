@@ -1,9 +1,9 @@
-There are 2 ways of installing the software ./RPi_Cam_Web_Interface_Installer.sh and a set of dedicated scripts.
+Run these commands on the pi you are setting up:
 
-The ./RPi_Cam_Web_Interface_Installer.sh is the original scheme largely developed under Wheezy.
-
-The dedicated scripts are a re-factoring to simplify the process and these work under Wheezy and Jessie.
-Future changes will be made to these.
+- sudo apt-get update
+- sudo apt-get install git
+- git clone https://github.com/redbuttegarden/RPi_Cam_Web_Interface.git
+- RPi_Cam_Web_Interface/./install.sh # run the install script
 
 5 scripts are used instead of combining all together.
 This avoids the overhead of a separate selection and makes it easier to run a particular function automatically.
