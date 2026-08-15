@@ -29,6 +29,7 @@
 # Edited by slabua to support custom installation folder
 # Additions by btidey, miraaz, gigpi
 # Split up and refactored by Bob Tidey 
+# Stop function expanded by auslaner
 
 #Debug enable next 3 lines
 exec 5> stop.txt
@@ -42,14 +43,39 @@ if [ -z "$camera_backend" ]; then
    camera_backend="legacy"
 fi
 
-fn_stop ()
-{ # This is function stop
-   sudo killall raspimjpeg 2>/dev/null
-   sudo pkill -f '[r]picam_picamera2.py' 2>/dev/null
-   sudo pkill -f '[/]usr/bin/raspimjpeg' 2>/dev/null
-   sudo pkill -f '[/]opt/vc/bin/raspimjpeg' 2>/dev/null
-   sudo killall php 2>/dev/null
-   sudo killall motion 2>/dev/null
+fn_stop()
+{
+    local camera_pattern='^python3[[:space:]]+/usr/bin/raspimjpeg([[:space:]]|$)'
+
+    # Stop processes that might relaunch the camera backend.
+    sudo killall motion 2>/dev/null || true
+    sudo killall php 2>/dev/null || true
+
+    # Stop current and legacy camera backends gracefully.
+    sudo pkill -TERM -f "$camera_pattern" 2>/dev/null || true
+    sudo pkill -TERM -f '[r]picam_picamera2.py' 2>/dev/null || true
+    sudo pkill -TERM -f '[/]opt/vc/bin/raspimjpeg' 2>/dev/null || true
+
+    # Allow Picamera2 to close and release its device handles.
+    for _ in $(seq 1 20); do
+        if ! sudo pgrep -f "$camera_pattern" >/dev/null; then
+            echo "Camera backend stopped."
+            return 0
+        fi
+        sleep 0.25
+    done
+
+    # Force termination only if graceful shutdown did not finish.
+    echo "Camera backend did not stop gracefully; forcing termination."
+    sudo pkill -KILL -f "$camera_pattern" 2>/dev/null || true
+    sleep 0.5
+
+    if sudo pgrep -af "$camera_pattern"; then
+        echo "ERROR: Camera backend was restarted by another process."
+        return 1
+    fi
+
+    echo "Camera backend stopped."
 }
 
 #stop operation
